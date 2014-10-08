@@ -657,7 +657,7 @@ static struct snd_soc_dai_link snd_rpi_wsp_dai[] = {
 static int snd_rpi_wsp_late_probe(struct snd_soc_card *card)
 {
 	struct snd_soc_codec *codec = card->rtd[0].codec;
-	struct wm5102_machine_priv *priv = snd_soc_card_get_drvdata(codec->card);
+	struct wm5102_machine_priv *priv = snd_soc_card_get_drvdata(card);
 	int i, ret;
 
 	priv->codec = codec;
