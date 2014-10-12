@@ -63,6 +63,12 @@ struct vc_msg {
 /* ---------- GLOBALS ---------- */
 static struct cpufreq_driver bcm2835_cpufreq_driver;	/* the cpufreq driver global */
 
+static struct cpufreq_frequency_table bcm2835_freq_table[] = {
+	{0, 0, 0},
+	{0, 0, 0},
+	{0, 0, CPUFREQ_TABLE_END},
+};
+
 /*
  ===============================================
   clk_rate either gets or sets the clock rates.
@@ -157,78 +163,57 @@ static void __exit bcm2835_cpufreq_module_exit(void)
 static int bcm2835_cpufreq_driver_init(struct cpufreq_policy *policy)
 {
 	/* measured value of how long it takes to change frequency */
-	policy->cpuinfo.transition_latency = 355000; /* ns */
+	const unsigned int transition_latency = 355000; /* ns */
 
 	/* now find out what the maximum and minimum frequencies are */
-	policy->min = policy->cpuinfo.min_freq = bcm2835_cpufreq_get_clock(VCMSG_GET_MIN_CLOCK);
-	policy->max = policy->cpuinfo.max_freq = bcm2835_cpufreq_get_clock(VCMSG_GET_MAX_CLOCK);
-	policy->cur = bcm2835_cpufreq_get_clock(VCMSG_GET_CLOCK_RATE);
+	bcm2835_freq_table[0].frequency = bcm2835_cpufreq_get_clock(VCMSG_GET_MIN_CLOCK);
+	bcm2835_freq_table[1].frequency = bcm2835_cpufreq_get_clock(VCMSG_GET_MAX_CLOCK);
 
-	print_info("min=%d max=%d cur=%d\n", policy->min, policy->max, policy->cur);
+	print_info("min=%d max=%d\n", bcm2835_freq_table[0].frequency, bcm2835_freq_table[1].frequency);
+	return cpufreq_generic_init(policy, bcm2835_freq_table, transition_latency);
+}
+
+/*
+ =====================================================================
+  Target index function chooses the requested frequency from the table
+ =====================================================================
+*/
+
+static int bcm2835_cpufreq_driver_target_index(struct cpufreq_policy *policy, unsigned int state)
+{
+	unsigned int target_freq = bcm2835_freq_table[state].frequency;
+	unsigned int cur = bcm2835_cpufreq_set_clock(policy->cur, target_freq);
+
+	if (!cur)
+	{
+		print_err("Error occurred setting a new frequency (%d)\n", target_freq);
+		return -EINVAL;
+	}
+	print_debug("%s: %i: freq %d->%d\n", policy->governor->name, state, policy->cur, cur);
 	return 0;
 }
 
 /*
- =================================================================================
-  Target function chooses the most appropriate frequency from the table to enable
- =================================================================================
+ ======================================================
+  Get function returns the current frequency from table
+ ======================================================
 */
-
-static int bcm2835_cpufreq_driver_target(struct cpufreq_policy *policy, unsigned int target_freq, unsigned int relation)
-{
-	unsigned int target = target_freq;
-#ifdef CPUFREQ_DEBUG_ENABLE
-	unsigned int cur = policy->cur;
-#endif
-	print_debug("%s: min=%d max=%d cur=%d target=%d\n",policy->governor->name,policy->min,policy->max,policy->cur,target_freq);
-
-	/* if we are above min and using ondemand, then just use max */
-	if (strcmp("ondemand", policy->governor->name)==0 && target > policy->min)
-		target = policy->max;
-	/* if the frequency is the same, just quit */
-	if (target == policy->cur)
-		return 0;
-
-	/* otherwise were good to set the clock frequency */
-	policy->cur = bcm2835_cpufreq_set_clock(policy->cur, target);
-
-	if (!policy->cur)
-	{
-		print_err("Error occurred setting a new frequency (%d)!\n", target);
-		policy->cur = bcm2835_cpufreq_get_clock(VCMSG_GET_CLOCK_RATE);
-		return -EINVAL;
-	}
-	print_debug("Freq %d->%d (min=%d max=%d target=%d request=%d)\n", cur, policy->cur, policy->min, policy->max, target_freq, target);
-	return 0;
-}
 
 static unsigned int bcm2835_cpufreq_driver_get(unsigned int cpu)
 {
 	unsigned int actual_rate = bcm2835_cpufreq_get_clock(VCMSG_GET_CLOCK_RATE);
-	print_debug("cpu=%d\n", actual_rate);
-	return actual_rate;
+	print_debug("%d: freq=%d\n", cpu, actual_rate);
+	return actual_rate <= bcm2835_freq_table[0].frequency ? bcm2835_freq_table[0].frequency : bcm2835_freq_table[1].frequency;
 }
-
-/*
- =================================================================================
-  Verify ensures that when a policy is changed, it is suitable for the CPU to use
- =================================================================================
-*/
-
-static int bcm2835_cpufreq_driver_verify(struct cpufreq_policy *policy)
-{
-	print_info("switching to governor %s\n", policy->governor->name);
-	return 0;
-}
-
 
 /* the CPUFreq driver */
 static struct cpufreq_driver bcm2835_cpufreq_driver = {
-		.name   = "BCM2835 CPUFreq",
-		.init   = bcm2835_cpufreq_driver_init,
-		.verify = bcm2835_cpufreq_driver_verify,
-		.target = bcm2835_cpufreq_driver_target,
-		.get    = bcm2835_cpufreq_driver_get
+	.name         = "BCM2835 CPUFreq",
+	.init         = bcm2835_cpufreq_driver_init,
+	.verify       = cpufreq_generic_frequency_table_verify,
+	.target_index = bcm2835_cpufreq_driver_target_index,
+	.get          = bcm2835_cpufreq_driver_get,
+	.attr         = cpufreq_generic_attr,
 };
 
 MODULE_AUTHOR("Dorian Peake and Dom Cobley");
